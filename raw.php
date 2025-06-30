@@ -1,27 +1,25 @@
 <?php
 
-// تفعيل عرض جميع الأخطاء للمساعدة في اكتشاف المشاكل
-ini_set('display_errors', 1);
-error_reporting(E_ALL);
+// ==================================================================
+// ===================   اعدادات أساسية   ===========================
+// ==================================================================
 
-// -- تعديل مهم --
-// استخدام __DIR__ لتحديد مسار ملف الفيديو بشكل دقيق
-// هذا يضمن أن السكربت سيجد الفيديو دائمًا
-define("VIDEO_FILE_PATH", __DIR__ . "/live.mp4");
+define("VIDEO_FILE_PATH", "live.mp4");
 
-// هذه القيم يجب أن تبقى سرية وتُحدّث باستمرار
+// ==================================================================
+// ===================   بيانات الجلسة الخاصة بك   ====================
+// ==================================================================
+
 define("USER_AGENT", "Instagram 309.1.0.41.113 Android (33/13; 480dpi; 1080x2170; realme; RMX3491; RED8C1L1; qcom; ar_IQ; 541635890)");
 define("IG_CLAIM", "hmac.AR2kDPoo6NOyTOZ3M9LYc4R7dVs95as_BQWE7bYKvJs589FB");
-define("AUTH_BEARER", "IGT:2:ey..."); // يجب وضع التوكن الكامل هنا
+define("AUTH_BEARER", "IGT:2:eyJkc191c2VyX2lkIjoiMzU4MTM0NjU5Iiwic2Vzc2lvbmlkIjoiMzU4MTM0NjU5JTNBWDdrMjllNXlQcmdNQ1clM0EyOSUzQUFZY0hucTlEbHJURnJYb2t6Q3pKSmN6Uk1YX1lfZTdVLVNmQmtnVE44ZyJ9");
 define("DEVICE_ID", "aac32ce7-0663-409b-87bd-4f6d88d44b4b");
-define("SESSION_COOKIES", "csrftoken=..."); // يجب وضع الكوكيز الكاملة هنا
+define("SESSION_COOKIES", "csrftoken=65ARdKqN1kO8HPRoYlHF4t1xfs7aduyH; mid=aATbvwABAAEsC6vZkNpaRVXsflWI; ig_did=254F1F92-AD1E-47BF-86C5-33F251F7198E; ig_nrcb=1");
 
-/**
- * يرسل طلب cURL إلى سيرفرات انستغرام
- * @param string $url
- * @param string|null $postData
- * @return array|null
- */
+// ==================================================================
+// ===================   الدوال الأساسية للسكربت   ===================
+// ==================================================================
+
 function sendRequest(string $url, ?string $postData = ''): ?array
 {
     $curl = curl_init();
@@ -39,104 +37,83 @@ function sendRequest(string $url, ?string $postData = ''): ?array
         CURLOPT_URL => $url,
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_ENCODING => '',
+        CURLOPT_MAXREDIRS => 10,
         CURLOPT_TIMEOUT => 30,
-        CURLOPT_POST => true,
+        CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+        CURLOPT_CUSTOMREQUEST => 'POST',
         CURLOPT_POSTFIELDS => $postData,
         CURLOPT_COOKIE => SESSION_COOKIES,
         CURLOPT_HTTPHEADER => $headers,
-        CURLOPT_SSL_VERIFYPEER => false,
-        CURLOPT_SSL_VERIFYHOST => false,
-        CURLOPT_VERBOSE => true, // مفيد جدًا لعرض تفاصيل الطلب والأخطاء
     ]);
 
     $response = curl_exec($curl);
     $err = curl_error($curl);
-    $info = curl_getinfo($curl);
     curl_close($curl);
 
     if ($err) {
-        echo "[cURL ERROR] $err\n";
-        return null;
-    }
-    
-    // طباعة كود الحالة للمساعدة في التشخيص
-    echo "[HTTP Status Code] " . $info['http_code'] . "\n";
-
-    $decoded = json_decode($response, true);
-    if (json_last_error() !== JSON_ERROR_NONE) {
-        echo "[JSON ERROR] " . json_last_error_msg() . "\n";
-        echo "[RAW RESPONSE]\n$response\n";
+        echo "cURL Error: " . $err . "\n";
         return null;
     }
 
-    return $decoded;
+    return json_decode($response, true);
 }
 
-/**
- * يبدأ بث الفيديو باستخدام FFmpeg
- * @param string $videoPath
- * @param string $uploadUrl
- */
-function streamVideo(string $videoPath, string $uploadUrl): void
-{
-    if (!file_exists($videoPath)) {
-        echo "❌ ملف الفيديو غير موجود في المسار: $videoPath\n";
-        return;
-    }
+// ==================================================================
+// ===================   منطق تنفيذ البث   =========================
+// ==================================================================
 
-    // بناء أمر FFmpeg كسلسلة نصية واحدة لتجنب مشاكل التحليل
-    $command = sprintf(
-        "ffmpeg -re -i %s -c:v libx264 -preset veryfast -maxrate 2500k -bufsize 5000k -pix_fmt yuv420p -g 50 -c:a aac -b:a 128k -ar 44100 -f flv \"%s\"",
-        escapeshellarg($videoPath), // حماية مسار الملف
-        $uploadUrl // الرابط لا يحتاج حماية لأنه من المفترض أن يكون آمنًا
-    );
-    
-    echo "[FFmpeg Command] Executing: $command\n";
+echo "[1/4] جارٍ إنشاء بث مباشر جديد...\n";
+$createUrl = 'https://i.instagram.com/api/v1/live/create/';
+$createPostData = 'user_pay_enabled=false&broadcast_type=RTMP_SWAP_ENABLED&internal_only=0&visibility=0&_uuid=' . DEVICE_ID;
+$createResponse = sendRequest($createUrl, $createPostData);
 
-    // استخدام passthru لتنفيذ الأمر وعرض المخرجات مباشرة
-    passthru($command, $return_code);
-
-    if ($return_code !== 0) {
-        echo "❌ انتهى FFmpeg مع رمز خطأ: $return_code\n";
-    } else {
-        echo "✔️ انتهى بث FFmpeg بنجاح.\n";
-    }
-}
-
-// -- بداية تنفيذ السكربت --
-
-echo "[1] إنشاء بث مباشر...\n";
-$create = sendRequest("https://i.instagram.com/api/v1/live/create/", "user_pay_enabled=false&broadcast_type=RTMP_SWAP_ENABLED&internal_only=0&visibility=0&_uuid=" . DEVICE_ID);
-
-if (!$create || ($create["status"] ?? 'fail') !== "ok") {
-    echo "❌ فشل في إنشاء البث.\n";
-    print_r($create);
+if (!$createResponse || $createResponse['status'] !== 'ok') {
+    echo "خطأ فادح: فشل في إنشاء البث المباشر.\n";
+    print_r($createResponse);
     exit;
 }
 
-$broadcastId = $create["broadcast_id"];
-$uploadUrl = $create["upload_url"];
+$broadcastId = $createResponse['broadcast_id'];
+$uploadUrl = $createResponse['upload_url'];
 
-echo "✔️ تم إنشاء البث: $broadcastId\n";
+echo "   > تم إنشاء البث بنجاح! (ID: {$broadcastId})\n";
 
-echo "[2] بدء البث...\n";
-$start = sendRequest("https://i.instagram.com/api/v1/live/{$broadcastId}/start/", '{"should_send_notifications":true}');
-if (!$start || ($start["status"] ?? 'fail') !== "ok") {
-    echo "❌ فشل بدء البث.\n";
-    print_r($start);
+echo "[2/4] جارٍ بدء البث على الهواء (ON AIR)...\n";
+$startUrl = "https://i.instagram.com/api/v1/live/{$broadcastId}/start/";
+$startResponse = sendRequest($startUrl, '{"should_send_notifications":true}');
+
+if (!$startResponse || $startResponse['status'] !== 'ok') {
+    echo "خطأ فادح: فشل في بدء البث على الهواء.\n";
+    print_r($startResponse);
+    exit;
+}
+echo "   > البث الآن مباشر ويظهر للمتابعين!\n";
+
+echo "[3/4] جارٍ بث الفيديو باستخدام FFmpeg...\n";
+echo "   > هذه العملية ستستغرق وقتاً طويلاً حسب مدة الفيديو.\n";
+
+if (!file_exists(VIDEO_FILE_PATH)) {
+    echo "خطأ فادح: ملف الفيديو المحدد في VIDEO_FILE_PATH غير موجود!\n";
+    sendRequest("https://i.instagram.com/api/v1/live/{$broadcastId}/end_broadcast/", '');
     exit;
 }
 
-echo "✔️ البث مباشر الآن! الرابط: $uploadUrl\n";
+$ffmpegCommand = "ffmpeg -re -i \"" . VIDEO_FILE_PATH . "\" -c:v libx264 -preset veryfast -maxrate 2500k -bufsize 5000k -pix_fmt yuv420p -g 50 -c:a aac -b:a 128k -ar 44100 -f flv \"{$uploadUrl}\"";
+shell_exec($ffmpegCommand);
 
-echo "[3] بث الفيديو باستخدام FFmpeg...\n";
-streamVideo(VIDEO_FILE_PATH, $uploadUrl);
+echo "   > اكتمل بث الفيديو من FFmpeg.\n";
 
-echo "[4] إنهاء البث...\n";
-$end = sendRequest("https://i.instagram.com/api/v1/live/{$broadcastId}/end_broadcast/", '');
-if (!$end || ($end["status"] ?? 'fail') !== "ok") {
-    echo "⚠️ فشل إنهاء البث.\n";
-    print_r($end);
+echo "[4/4] جارٍ إنهاء البث المباشر بشكل نظيف...\n";
+$endUrl = "https://i.instagram.com/api/v1/live/{$broadcastId}/end_broadcast/";
+$endResponse = sendRequest($endUrl, '');
+
+if (!$endResponse || $endResponse['status'] !== 'ok') {
+    echo "تحذير: فشل في إنهاء البث بشكل صحيح. قد يظل البث معلقاً.\n";
+    print_r($endResponse);
 } else {
-    echo "✔️ تم إنهاء البث بنجاح.\n";
+    echo "   > تم إنهاء البث بنجاح!\n";
 }
+
+echo "\n العملية تمت بنجاح.\n";
+
+?>
